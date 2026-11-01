@@ -67,3 +67,7 @@ dist/
 
 # 构建输出（脚本默认写到 build/out）
 la_pynq/build/out/
+
+# 比赛提交包（二进制产物，不入库）
+*.rar
+*.zip
