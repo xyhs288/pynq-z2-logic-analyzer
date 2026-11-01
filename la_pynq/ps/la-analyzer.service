@@ -1,0 +1,21 @@
+[Unit]
+Description=Logic Analyzer Web Server (la_server.py)
+Documentation=file:///home/xilinx/jupyter_notebooks/la_bringup/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/xilinx/jupyter_notebooks/la_bringup
+Environment=XILINX_XRT=/usr
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/local/share/pynq-venv/bin/python3 -u la_server.py --port 8080
+Restart=always
+RestartSec=5
+TimeoutStartSec=90
+StandardOutput=append:/home/xilinx/la_server.log
+StandardError=append:/home/xilinx/la_server.log
+
+[Install]
+WantedBy=multi-user.target

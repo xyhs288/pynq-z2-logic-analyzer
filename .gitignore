@@ -1,0 +1,66 @@
+# ---- Vivado 工作文件（每次运行都会重新生成）----
+.Xil/
+*.jou
+*.log
+*.str
+*.pb
+*.wdb
+*.dcp
+*.bit
+*.hwh
+*.ltx
+*.runs/
+*.cache/
+*.hw/
+*.sim/
+*.ip_user_files/
+*.gen/
+*.xpr
+*.xsa
+clockInfo.txt
+
+# ---- 仿真中间产物 ----
+la_pynq/sim/xsim.dir/
+la_pynq/sim/xsim_*.backup.*
+la_pynq/sim/vivado_pid*.str
+dfx_runtime.txt
+
+# ---- 操作系统 / 编辑器 ----
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.DS_Store
+
+# ---- Python ----
+__pycache__/
+*.pyc
+*.pyo
+
+# ---- 工具工作目录（内部笔记，不进提交仓库）----
+.workbuddy/
+
+# ---- 内部工作记录，不进公开仓库 ----
+llm_log/
+PROGRESS.md
+logic_analyzer_action_plan.md
+交付说明.md
+录制脚本.md
+
+# ---- 报告与交付物，不属于工程文件 ----
+report/
+*.docx
+dist/
+
+# ---- 第三方文档（版权原因不随仓库分发，自行从 TUL/AMD 官网下载）----
+la_pynq/docs/pynq_z2_manual_text.md
+
+# 说明：
+#   sim/*.png  和 sim/*.csv 是仿真产物，但同时是报告素材，因此保留在仓库里。
+#   bitstream 不入库——用 la_pynq/build/ 下的 Tcl 脚本可完整重建（可复现性）。
+
+# Vivado 的时序检查产物
+tight_setup_hold_pins.txt
+
+# ---- 交付打包产物 ----
+dist/

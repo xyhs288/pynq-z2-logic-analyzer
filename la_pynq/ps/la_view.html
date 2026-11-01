@@ -1,0 +1,956 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>多通道逻辑分析仪 · 实时波形</title>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#111823; --fg:#d6e2f0; --dim:#7b8a9e;
+    --accent:#4cc2ff; --ok:#3fb950; --warn:#d29922; --cursor:#ff8c42; --trig:#f85149;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:var(--bg);color:var(--fg);
+       font:13px/1.4 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+       display:flex;flex-direction:column;overflow:hidden;-webkit-font-smoothing:antialiased}
+
+  header{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:8px 14px;
+         background:var(--panel);border-bottom:1px solid #1e2a38}
+  header .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);
+              box-shadow:0 0 8px var(--ok);flex:0 0 auto}
+  header h1{font-size:14px;font-weight:600;white-space:nowrap}
+  header h1 span{color:var(--dim);font-weight:400;font-size:11px;margin-left:7px}
+  .stats{margin-left:auto;display:flex;gap:14px;font-variant-numeric:tabular-nums}
+  .stat{display:flex;flex-direction:column;align-items:flex-end;line-height:1.2}
+  .stat b{font-size:13px;font-weight:600}
+  .stat i{font-size:10px;color:var(--dim);font-style:normal}
+  .stat.hw b{color:var(--ok)}
+
+  main{flex:1 1 auto;position:relative;min-height:0}
+  canvas{position:absolute;inset:0;display:block;cursor:crosshair}
+
+  footer{flex:0 0 auto;background:var(--panel);border-top:1px solid #1e2a38;padding:6px 14px}
+  .frow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:28px}
+  .frow + .frow{margin-top:4px}
+  label{color:var(--dim);font-size:11px;margin-left:4px}
+  select,button{background:#0f1620;color:var(--fg);border:1px solid #243447;
+                border-radius:5px;padding:4px 8px;font-size:12px;cursor:pointer;font-family:inherit}
+  select:hover,button:hover{border-color:var(--accent)}
+  button:disabled{opacity:.5;cursor:default}
+  button.on{border-color:var(--warn);color:var(--warn)}
+  button.big{padding:5px 14px;font-weight:600}
+  button.big.run{border-color:var(--ok);color:var(--ok)}
+  button.nav{padding:3px 9px;line-height:1;min-width:28px;font-size:12px}
+  .sep{width:1px;height:18px;background:#243447;margin:0 4px}
+  input[type=range]{-webkit-appearance:none;height:4px;border-radius:2px;
+    background:#243447;outline:none;cursor:pointer}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;
+    border-radius:50%;background:var(--accent);cursor:pointer}
+  input[type=range]:disabled{opacity:.35;cursor:default}
+  #scrub{flex:0 0 170px}
+  .hint{color:var(--dim);font-size:11px}
+  .measure{margin-left:auto;display:flex;gap:16px;font-variant-numeric:tabular-nums;
+           font-size:12px;color:var(--dim)}
+  .measure b{color:var(--fg);font-weight:600}
+  .measure .dt b{color:var(--cursor)}
+
+  #toast{position:fixed;top:56px;left:50%;transform:translateX(-50%);
+         background:var(--trig);color:#fff;padding:8px 18px;border-radius:6px;
+         font-size:13px;font-weight:600;opacity:0;transition:opacity .18s;
+         pointer-events:none;z-index:9}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="dot" id="dot"></div>
+  <h1>多通道逻辑分析仪</h1>
+  <div class="stats">
+    <div class="stat"><b id="s-rate">—</b><i>采样率</i></div>
+    <div class="stat"><b id="s-fps">—</b><i>刷新</i></div>
+    <div class="stat"><b id="s-win">—</b><i>窗口</i></div>
+    <div class="stat"><b id="s-pts">0</b><i>累计读回点</i></div>
+    <div class="stat"><b id="s-run">0.0 s</b><i>运行</i></div>
+  </div>
+</header>
+
+<main><canvas id="cv"></canvas></main>
+
+<footer>
+  <div class="frow">
+    <button id="btn-run" class="big">⏸ 停止采集</button>
+    <button id="btn-tr">单次触发</button>
+    <button id="btn-live">实时滚动</button>
+    <div class="sep"></div>
+    <label>历史</label>
+    <button id="btn-prev" class="nav" title="上一快照（←）">◀</button>
+    <input type="range" id="scrub" min="0" max="0" value="0" step="1" disabled>
+    <button id="btn-next" class="nav" title="下一快照（→）">▶</button>
+    <span class="hint" id="scrubLbl">缓冲 —</span>
+    <div class="measure">
+      <span>游标 A <b id="mA">—</b></span>
+      <span>游标 B <b id="mB">—</b></span>
+      <span class="dt">Δt <b id="mD">—</b></span>
+    </div>
+  </div>
+  <div class="frow">
+    <label>缩放</label>
+    <button id="btn-zo">−</button>
+    <button id="btn-zi">+</button>
+    <button id="btn-fit">适配</button>
+    <div class="sep"></div>
+    <label>采样率</label>
+    <select id="sel-div">
+      <option value="1">62.5 MHz</option>
+      <option value="10">6.25 MHz</option>
+      <option value="20">3.13 MHz</option>
+      <option value="40">1.56 MHz</option>
+      <option value="100">625 kHz</option>
+      <option value="1000" selected>62.5 kHz</option>
+      <option value="10000">6.25 kHz</option>
+      <option value="100000">625 Hz</option>
+    </select>
+    <label>点数</label>
+    <select id="sel-n">
+      <option value="1024" selected>1024</option>
+      <option value="2048">2048</option>
+      <option value="4096">4096</option>
+      <option value="8192">8192（满深度）</option>
+    </select>
+    <label>解码</label>
+    <select id="sel-proto">
+      <option value="0" selected>UART（CH0）</option>
+      <option value="2">I2C（CH4+CH5）</option>
+      <option value="9">关闭</option>
+    </select>
+    <button id="btn-pb" title="Pmod B 测试信号总开关。关掉后 8 根针高阻，可把 Pmod A 接真实被测电路">Pmod B：开</button>
+    <div class="sep"></div>
+    <label>触发通道</label>
+    <select id="sel-tch">
+      <option value="0">CH0</option>
+      <option value="1">CH1</option>
+      <option value="2">CH2</option>
+      <option value="3">CH3</option>
+      <option value="4">CH4</option>
+      <option value="5" selected>CH5</option>
+      <option value="6">CH6</option>
+      <option value="7">CH7</option>
+    </select>
+    <label>边沿</label>
+    <select id="sel-edge">
+      <option value="0" selected>上升沿</option>
+      <option value="1">下降沿</option>
+    </select>
+    <button id="btn-png">导出 PNG</button>
+  </div>
+</footer>
+
+<script>
+const cv  = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const COL = ['#4cc2ff','#3fb950','#d29922','#f85149','#bc8cff','#39c5cf','#ff7b72','#7ee787'];
+
+// ================= 状态 =================
+const RING = 65536;
+const MAXVIEW = 8192;
+const ring = new Uint8Array(RING);
+const buf  = new Uint8Array(MAXVIEW);
+let head = 0, count = 0;
+
+// 快照历史：每个元素 = 一次「停写 -> 完整读回 -> 恢复」得到的连续片段。
+// 快照之间在时间上并不连续（中间隔着整个读取耗时，1.5625 MSa/s 下是十几万点），
+// 所以绝不能首尾拼成一条"连续缓冲"——那样波形看着连贯，解码跨接缝必错。
+const SNAPS = [];
+const SNAP_MAX = 40;
+let snapCur = -1;
+let N = 1024;
+let DIV = 40, CLK = 62.5e6;
+let PROTO = 0;            // 0=UART 9=关闭
+let live = true, running = false;   // 打开页面先停着，等用户点「开始采集」
+let viewLen = 1024, viewStart = 0;
+let fps = 0;
+const shown = [true,true,true,true,true,true,true,true];
+let curA = null, curB = null;
+let hoverX = null;
+let drag = null;
+let trigPos = null;
+let busy = false;
+
+// 实时性证据：累计点 / 运行时长 / 板载按钮
+let totalPts = 0, runMs = 0, lastT = 0;
+let btnCnt = -1;
+
+// ================= 画布 =================
+const dpr = () => window.devicePixelRatio || 1;
+const PAD_L = () => 78 * dpr(), PAD_R = () => 14 * dpr();
+const PAD_T = () => 8  * dpr(), PAD_B = () => 30 * dpr();
+const plotW = () => cv.width - PAD_L() - PAD_R();
+const plotH = () => cv.height - PAD_T() - PAD_B();
+
+function fit() {
+  const r = cv.parentElement.getBoundingClientRect();
+  cv.width  = Math.max(1, Math.floor(r.width  * dpr()));
+  cv.height = Math.max(1, Math.floor(r.height * dpr()));
+  cv.style.width  = r.width  + 'px';
+  cv.style.height = r.height + 'px';
+}
+new ResizeObserver(fit).observe(document.querySelector('main'));
+fit();
+
+// ================= 单位 / 刻度 =================
+function fmtTime(sec) {
+  const a = Math.abs(sec);
+  if (a >= 1)    return sec.toFixed(3) + ' s';
+  if (a >= 1e-3) return (sec * 1e3).toFixed(2) + ' ms';
+  if (a >= 1e-6) return (sec * 1e6).toFixed(2) + ' µs';
+  return (sec * 1e9).toFixed(0) + ' ns';
+}
+function fmtHz(f) {
+  if (f >= 1e6) return (f / 1e6).toFixed(2) + 'M';
+  if (f >= 1e3) return (f / 1e3).toFixed(1) + 'k';
+  return f.toFixed(1);
+}
+function niceStep(span, target) {
+  const raw = span / target;
+  const e = Math.floor(Math.log10(raw));
+  const b = raw / Math.pow(10, e);
+  let m = 1;
+  if (b > 5) m = 10; else if (b > 2) m = 5; else if (b > 1) m = 2;
+  return m * Math.pow(10, e);
+}
+
+// ================= 数据 =================
+function pushSamples(u8) {
+  for (let i = 0; i < u8.length; i++) {
+    ring[head] = u8[i];
+    head = (head + 1) % RING;
+    if (count < RING) count++;
+  }
+  dirty = true;
+}
+function resetRing() { head = 0; count = 0; }
+
+// 把第 k 个快照装进绘制用的环形缓冲（一个快照就是一个视图，不拼接）
+function showSnap(k) {
+  if (!SNAPS.length) return;
+  snapCur = Math.max(0, Math.min(k, SNAPS.length - 1));
+  resetRing();
+  pushSamples(SNAPS[snapCur]);
+  viewStart = 0;
+  viewLen = Math.min(count, MAXVIEW);
+}
+
+function clearSnaps() { SNAPS.length = 0; snapCur = -1; resetRing(); }
+function at(i) {
+  const start = (head - count + RING) % RING;
+  return ring[(start + (i % RING) + RING) % RING];
+}
+function shownCount() { return Math.min(viewLen, count); }
+function viewLeft() {
+  const n = shownCount();
+  return live ? Math.max(0, count - n)
+              : Math.max(0, Math.min(viewStart, Math.max(0, count - n)));
+}
+function idxOf(x) {
+  const n = shownCount() || 1;
+  return viewLeft() + (x - PAD_L()) / plotW() * n;
+}
+
+// ============ 前端 I2C 解码（仅用于波形标注，PL 里的硬件解码器才是主体） ============
+function decodeI2C(d, n) {
+  const out = [];
+  let sclP = (d[0] >> 4) & 1, sdaP = (d[0] >> 5) & 1;
+  let inFrame = false, bitCnt = 0, val = 0, bStart = -1;
+
+  for (let i = 1; i < n; i++) {
+    const scl = (d[i] >> 4) & 1, sda = (d[i] >> 5) & 1;
+    if (scl && sclP) {
+      if (sdaP && !sda) { out.push({ t: 'S', i }); inFrame = true; bitCnt = 0; val = 0; }
+      else if (!sdaP && sda) { out.push({ t: 'P', i }); inFrame = false; }
+    }
+    if (!sclP && scl && inFrame) {
+      if (bitCnt === 0) bStart = i;
+      if (bitCnt < 8) { val = (val << 1) | sda; bitCnt++; }
+      else { out.push({ t: 'B', i0: bStart, i1: i, v: val, ack: !sda }); bitCnt = 0; val = 0; }
+    }
+    sclP = scl; sdaP = sda;
+  }
+  return out;
+}
+
+function drawI2C(ev, pl, pt, gw, gh, n) {
+  const D = dpr(), rowH = gh / 8;
+  const yTop = pt + rowH * 5 + rowH * 0.03;
+
+  for (const e of ev) {
+    if (e.t === 'B') {
+      const x0 = pl + gw * e.i0 / n, x1 = pl + gw * e.i1 / n;
+      const w = Math.max(1, x1 - x0);
+      ctx.fillStyle = e.ack ? 'rgba(76,194,255,.15)' : 'rgba(248,81,73,.18)';
+      ctx.fillRect(x0, yTop, w, rowH * 0.30);
+      ctx.strokeStyle = e.ack ? 'rgba(76,194,255,.75)' : 'rgba(248,81,73,.85)';
+      ctx.lineWidth = 1 * D;
+      ctx.strokeRect(x0 + .5, yTop + .5, w - 1, rowH * 0.30 - 1);
+      if (w > 30 * D) {
+        ctx.fillStyle = e.ack ? '#8fd8ff' : '#ff9a94';
+        ctx.font = (9 * D) + 'px ui-monospace, Consolas, monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(e.v.toString(16).toUpperCase().padStart(2, '0'),
+                     x0 + w / 2, yTop + rowH * 0.15);
+        ctx.textAlign = 'left';
+      }
+    } else {
+      const x = pl + gw * e.i / n;
+      ctx.fillStyle = e.t === 'S' ? '#3fb950' : '#d29922';
+      ctx.beginPath();
+      ctx.moveTo(x, yTop);
+      ctx.lineTo(x - 4 * D, yTop + 9 * D);
+      ctx.lineTo(x + 4 * D, yTop + 9 * D);
+      ctx.closePath();
+      ctx.fill();
+      if (gw > 260) {
+        ctx.font = (8 * D) + 'px ui-monospace, Consolas, monospace';
+        ctx.fillText(e.t === 'S' ? 'START' : 'STOP', x + 5 * D, yTop + 5 * D);
+      }
+    }
+  }
+}
+
+// ================= UART 解码（前端复算，仅用于波形标注） =================
+// 每位 = 640 clk，采样率 = CLK/DIV，所以每位占 640/DIV 个采样点
+function decodeUART(buf, n, ch, spb, idleBits) {
+  const bit = i => (buf[Math.round(i)] >> ch) & 1;
+  const out = [];
+  const frame = spb * 10;
+  // 起始位判据：前面空闲高电平至少要持续 idleBits 个位。
+  // 为什么不是"半个位"就够：窗口最左端常常是被截断的半个字节，
+  // 从那里起扫会把字节内部的下降沿当成起始位，解出一个假的 0xFF。
+  // 我们的源字节之间留了 25 位空闲，所以要求 6 位能稳定锁定；
+  // 换成连续发送的真实设备时，调用方会用 idleBits=1.5 退回宽松模式。
+  const guard = Math.ceil(spb * idleBits);
+  let i = Math.max(1, guard);
+  let run = 0;                                  // 到 i-1 为止的连续高电平点数
+  while (i < n - frame) {
+    if (bit(i - 1) === 1) run++; else run = 0;
+    if (run >= guard && bit(i) === 0) {
+      let v = 0;
+      for (let k = 0; k < 8; k++) v |= bit(i - 1 + spb * (1.5 + k)) << k;
+      const ok = bit(i - 1 + spb * 9.5) === 1;
+      out.push({ i0: i - 1, i1: i - 1 + frame, v, ok });
+      i += spb * 9;
+      run = 0;
+    } else i++;
+  }
+  return out;
+}
+
+function drawUART(ev, pl, pt, gw, gh, n) {
+  const D = dpr(), rowH = gh / 8;
+  const yb = pt + rowH * 0.06, hh = rowH * 0.40;
+  const fs = Math.max(11, Math.min(15, rowH * 0.34)) * D;
+
+  let bad = 0;
+  for (const e of ev) {
+    const x0 = pl + gw * e.i0 / n, x1 = pl + gw * e.i1 / n;
+    const w = Math.max(1, x1 - x0);
+    if (!e.ok) bad++;
+
+    // 帧框：正常蓝、出错红
+    ctx.fillStyle = e.ok ? 'rgba(76,194,255,.16)' : 'rgba(248,81,73,.22)';
+    ctx.fillRect(x0, yb, w, hh);
+    ctx.strokeStyle = e.ok ? 'rgba(76,194,255,.85)' : 'rgba(248,81,73,.95)';
+    ctx.lineWidth = 1.4 * D;
+    ctx.strokeRect(x0 + .5, yb + .5, Math.max(1, w - 1), hh - 1);
+
+    // 字节：ASCII 可打印的附在括号里，一眼能认出是文本
+    const ch2 = (e.v >= 32 && e.v < 127) ? String.fromCharCode(e.v) : '';
+    const txt = e.v.toString(16).toUpperCase().padStart(2, '0') + (ch2 ? " '" + ch2 + "'" : '');
+    ctx.font = 'bold ' + fs + 'px ui-monospace, Consolas, monospace';
+    const tw = ctx.measureText(txt).width;
+
+    if (w > tw + 6 * D) {
+      // 文字底衬，保证任何波形颜色下都能看清
+      const cx = x0 + w / 2, ty = yb + hh / 2;
+      ctx.fillStyle = 'rgba(8,12,18,.92)';
+      ctx.fillRect(cx - tw / 2 - 3 * D, ty - fs * 0.72, tw + 6 * D, fs * 1.44);
+      ctx.fillStyle = e.ok ? '#eaf6ff' : '#ffd7d4';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(txt, cx, ty);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
+    }
+
+    // 帧出错时在右上角标 ERR
+    if (!e.ok && w > 26 * D) {
+      ctx.font = 'bold ' + (fs * 0.78) + 'px ui-monospace, monospace';
+      ctx.fillStyle = '#ff7b72';
+      ctx.fillText('ERR', x1 - 22 * D, yb - 2 * D);
+    }
+  }
+
+  // 右上角汇总：把这一帧里解出的可打印字节拼成一行，
+  // 一眼就能读出总线在发什么（例：PYNQ-LA0）—— 不用逐个框去认
+  const str = ev.filter(e => e.ok && e.v >= 32 && e.v < 127)
+                .map(e => String.fromCharCode(e.v)).join('');
+  const head = 'UART  ' + ev.length + ' 帧' + (bad ? '，' + bad + ' 帧错误' : '，全部正常');
+  const sum = str ? head + '   "' + (str.length > 40 ? str.slice(0, 40) + '…' : str) + '"' : head;
+  ctx.font = 'bold ' + (11 * D) + 'px ui-monospace, Consolas, monospace';
+  ctx.fillStyle = bad ? '#ff9a94' : '#8fd8ff';
+  ctx.textAlign = 'right';
+  ctx.fillText(sum, pl + gw - 2 * D, pt + 10 * D);
+  ctx.textAlign = 'left';
+}
+
+// 画一行提示（采样率/窗口不够时，用它说清楚为什么没有解码结果）
+function drawNote(text, color, pl, pt, gw) {
+  const D = dpr();
+  ctx.font = 'bold ' + (11 * D) + 'px ui-monospace, Consolas, monospace';
+  ctx.fillStyle = color;
+  ctx.textAlign = 'right';
+  ctx.fillText(text, pl + gw - 2 * D, pt + 10 * D);
+  ctx.textAlign = 'left';
+}
+
+// ================= 绘制 =================
+function draw() {
+  const W = cv.width, H = cv.height, D = dpr();
+  const pl = PAD_L(), pt = PAD_T(), gw = plotW(), gh = plotH();
+
+  ctx.clearRect(0, 0, W, H);
+
+  if (count === 0) {
+    ctx.fillStyle = '#7b8a9e';
+    ctx.font = (13 * D) + 'px ui-monospace, Consolas, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(busy ? '采集中…' : '已停止 —— 点下方「▶ 开始采集」，或按板上的 BTN0',
+                 W / 2, H / 2);
+    ctx.textAlign = 'left';
+    syncScrub();
+    return;
+  }
+
+  const n = shownCount(), left = viewLeft();
+  const spanSec = n * DIV / CLK;
+  const rowH = gh / 8;
+
+  for (let i = 0; i < n; i++) buf[i] = at(left + i);
+
+  const step = niceStep(spanSec, 8);
+  ctx.strokeStyle = '#1a2432';
+  ctx.lineWidth = 1;
+  for (let t = 0; t <= spanSec + 1e-15; t += step) {
+    const x = Math.round(pl + gw * t / spanSec) + .5;
+    ctx.beginPath(); ctx.moveTo(x, pt); ctx.lineTo(x, pt + gh); ctx.stroke();
+  }
+  for (let r = 0; r <= 8; r++) {
+    const y = Math.round(pt + rowH * r) + .5;
+    ctx.beginPath(); ctx.moveTo(pl, y); ctx.lineTo(pl + gw, y); ctx.stroke();
+  }
+
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+
+  for (let ch = 0; ch < 8; ch++) {
+    const base = pt + rowH * ch;
+
+    // I2C 模式下 CH4/CH5 是总线，标出角色比标频率有用
+    let tag = null;
+    if (PROTO === 2) {
+      if (ch === 4) tag = 'SCL';
+      else if (ch === 5) tag = 'SDA';
+    }
+
+    if (!shown[ch]) {
+      ctx.font = (11 * D) + 'px ui-monospace, Consolas, monospace';
+      ctx.fillStyle = '#39465a';
+      ctx.fillText('CH' + ch, 6 * D, base + rowH * 0.5);
+      continue;
+    }
+
+    const hi = base + rowH * 0.26, lo = base + rowH * 0.76;
+    ctx.strokeStyle = COL[ch];
+    ctx.lineWidth = 1.6 * D;
+    ctx.beginPath();
+
+    let bit = (buf[0] >> ch) & 1;
+    let y = bit ? hi : lo;
+    let edges = 0;
+    ctx.moveTo(pl, y);
+
+    for (let i = 1; i < n; i++) {
+      const b = (buf[i] >> ch) & 1;
+      if (b !== bit) {
+        edges++;
+        const x = pl + gw * i / n;
+        ctx.lineTo(x, y);
+        y = b ? hi : lo;
+        ctx.lineTo(x, y);
+        bit = b;
+      }
+    }
+    ctx.lineTo(pl + gw, y);
+    ctx.stroke();
+
+    ctx.font = (11 * D) + 'px ui-monospace, Consolas, monospace';
+    ctx.fillStyle = COL[ch];
+    ctx.fillText('CH' + ch, 6 * D, base + rowH * 0.34);
+
+    ctx.font = (10 * D) + 'px ui-monospace, Consolas, monospace';
+    ctx.fillStyle = tag ? '#8fd8ff' : '#7b8a9e';
+    if (tag) {
+      ctx.fillText(tag, 6 * D, base + rowH * 0.70);
+    } else {
+      const freq = edges >= 2 ? (edges / 2) / spanSec : 0;
+      ctx.fillText(edges >= 2 ? fmtHz(freq) + 'Hz' : '—', 6 * D, base + rowH * 0.70);
+    }
+  }
+
+  ctx.font = (11 * D) + 'px ui-monospace, Consolas, monospace';
+  ctx.fillStyle = '#7b8a9e';
+  ctx.textAlign = 'center';
+  for (let t = 0; t <= spanSec + 1e-15; t += step) {
+    const x = pl + gw * t / spanSec;
+    if (x > pl + gw + 2) break;
+    ctx.fillText(fmtTime(t), x, pt + gh + 13 * D);
+  }
+  ctx.textAlign = 'left';
+
+  if (PROTO === 2 && shown[4] && shown[5] && n > 16) {
+    drawI2C(decodeI2C(buf, n), pl, pt, gw, gh, n);
+  }
+  if (PROTO === 0 && shown[0]) {
+    const spb = 640 / DIV;                 // 每位采样点数（UART 位宽 = 640 clk）
+    if (spb >= 3 && spb * 10 < n) {
+      let ev = decodeUART(buf, n, 0, spb, 6);      // 我们的源字节间有大空隙
+      if (!ev.length) ev = decodeUART(buf, n, 0, spb, 1.5);   // 连续流退回宽松
+      drawUART(ev, pl, pt, gw, gh, n);
+    } else if (spb < 3) {
+      drawNote('UART 需每位 ≥3 点：当前 ' + spb.toFixed(2) + ' 点/位，采样率切 1.56 MHz',
+               '#ff9a94', pl, pt, gw);
+    } else {
+      drawNote('窗口太短：一帧 UART 要 ' + Math.round(spb * 10) + ' 点，加大点数',
+               '#ff9a94', pl, pt, gw);
+    }
+  }
+
+  if (trigPos !== null && trigPos >= 0 && trigPos < n) {
+    const x = pl + gw * trigPos / n;
+    ctx.strokeStyle = '#f85149';
+    ctx.lineWidth = 1.5 * D;
+    ctx.setLineDash([5 * D, 4 * D]);
+    ctx.beginPath(); ctx.moveTo(Math.round(x) + .5, pt); ctx.lineTo(Math.round(x) + .5, pt + gh); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#f85149';
+    ctx.fillRect(x - 9 * D, pt, 18 * D, 13 * D);
+    ctx.fillStyle = '#0b0f14';
+    ctx.font = (9 * D) + 'px ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('T', x, pt + 6.5 * D);
+    ctx.textAlign = 'left';
+  }
+
+  if (curA !== null && curB !== null) {
+    ctx.fillStyle = 'rgba(255,140,66,.10)';
+    ctx.fillRect(pl + gw * Math.min(curA, curB) / n, pt, gw * Math.abs(curB - curA) / n, gh);
+  }
+  drawCursor(curA, 'A', '#ff8c42', pl, pt, gw, gh, n);
+  drawCursor(curB, 'B', '#4cc2ff', pl, pt, gw, gh, n);
+
+  if (hoverX !== null) {
+    ctx.strokeStyle = 'rgba(214,226,240,.35)';
+    ctx.setLineDash([3 * D, 3 * D]);
+    ctx.beginPath();
+    ctx.moveTo(Math.round(hoverX) + .5, pt);
+    ctx.lineTo(Math.round(hoverX) + .5, pt + gh);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  updateStats(spanSec);
+  syncScrub();
+}
+
+function drawCursor(pos, name, color, pl, pt, gw, gh, n) {
+  if (pos === null) return;
+  const D = dpr();
+  const x = pl + gw * pos / n;
+  if (x < pl - 1 || x > pl + gw + 1) return;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.2 * D;
+  ctx.beginPath();
+  ctx.moveTo(Math.round(x) + .5, pt); ctx.lineTo(Math.round(x) + .5, pt + gh);
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.fillRect(x - 7 * D, pt, 14 * D, 13 * D);
+  ctx.fillStyle = '#0b0f14';
+  ctx.font = (9 * D) + 'px ui-monospace, monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(name, x, pt + 6.5 * D);
+  ctx.textAlign = 'left';
+}
+
+function updateStats(spanSec) {
+  document.getElementById('s-win').textContent = fmtTime(spanSec);
+  document.getElementById('s-rate').textContent = (CLK / DIV / 1000).toFixed(1) + ' kHz';
+  document.getElementById('s-fps').textContent = fps.toFixed(0) + ' Hz';
+  document.getElementById('s-pts').textContent =
+    totalPts >= 1e6 ? (totalPts / 1e6).toFixed(2) + ' M' : (totalPts / 1e3).toFixed(1) + ' k';
+  document.getElementById('s-run').textContent = (runMs / 1000).toFixed(1) + ' s';
+
+  const tOf = p => p * DIV / CLK;
+  document.getElementById('mA').textContent = curA === null ? '—' : fmtTime(tOf(curA));
+  document.getElementById('mB').textContent = curB === null ? '—' : fmtTime(tOf(curB));
+  document.getElementById('mD').textContent =
+    (curA === null || curB === null) ? '—' : fmtTime(Math.abs(tOf(curB) - tOf(curA)));
+}
+
+// ================= 历史滑块 =================
+const scrub = document.getElementById('scrub');
+const scrubLbl = document.getElementById('scrubLbl');
+const btnPrev = document.getElementById('btn-prev');
+const btnNext = document.getElementById('btn-next');
+
+function syncScrub() {
+  const last = SNAPS.length - 1;
+  if (+scrub.max !== Math.max(0, last)) scrub.max = Math.max(0, last);
+  const v = live ? Math.max(0, last) : Math.max(0, Math.min(snapCur, last));
+  if (+scrub.value !== v) scrub.value = v;
+  scrub.disabled = last <= 0;
+  btnPrev.disabled = last <= 0 || v <= 0;
+  btnNext.disabled = last <= 0 || v >= last;
+  scrubLbl.textContent = count > 0
+    ? ('快照 ' + (snapCur + 1) + '/' + (last + 1) + ' · 本帧连续 ' +
+       fmtTime(count * DIV / CLK) + '，帧间有空档')
+    : '快照 —';
+}
+
+// 拖滑块 = 回看历史快照；每帧都是独立连续的一段，不做拼接
+scrub.oninput = () => {
+  live = false; running = false;
+  showSnap(+scrub.value);
+  setRunBtn();
+};
+
+// 左右步进：一次一帧。帧与帧之间隔着整个读回耗时，
+// 所以只能"换一页"，不能像录像那样连续播放。
+function stepSnap(d) {
+  if (!SNAPS.length) return;
+  live = false; running = false;          // 一旦翻页就停在回看模式
+  const last = SNAPS.length - 1;
+  const from = (snapCur < 0) ? last : snapCur;
+  showSnap(from + d);
+  setRunBtn();
+  dirty = true;
+}
+
+btnPrev.onclick = () => stepSnap(-1);
+btnNext.onclick = () => stepSnap(+1);
+
+// 键盘：← → 翻快照，Home/End 跳到最旧/最新，空格开关采集
+window.addEventListener('keydown', (e) => {
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+  if (e.key === 'ArrowLeft')       { stepSnap(-1); e.preventDefault(); }
+  else if (e.key === 'ArrowRight') { stepSnap(+1); e.preventDefault(); }
+  else if (e.key === 'Home')       { if (SNAPS.length) { live = false; running = false; showSnap(0); setRunBtn(); dirty = true; } e.preventDefault(); }
+  else if (e.key === 'End')        { if (SNAPS.length) { live = false; running = false; showSnap(SNAPS.length - 1); setRunBtn(); dirty = true; } e.preventDefault(); }
+  else if (e.key === ' ')          { document.getElementById('btn-run').onclick(); e.preventDefault(); }
+});
+
+// ================= 主循环 =================
+async function oneFrame() {
+  const t0 = performance.now();
+  const r = await fetch('/data?n=' + N);
+  // 503 = 板子正在重载 PL。绝不能把错误正文当采样数据推进快照
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const ab = await r.arrayBuffer();
+  SNAPS.push(new Uint8Array(ab));
+  if (SNAPS.length > SNAP_MAX) SNAPS.shift();
+  if (live) showSnap(SNAPS.length - 1);
+  fps = 1000 / Math.max(1, performance.now() - t0);
+
+  totalPts += ab.byteLength;
+  const now = performance.now();
+  if (lastT) runMs += Math.min(now - lastT, 500);   // 切后台回来不要一次加一大段
+  lastT = now;
+}
+
+// 取数与绘制分开：取数慢（8192 点约 0.3 s）时不再拖累重绘
+let dirty = true;
+
+async function fetchLoop() {
+  for (;;) {
+    if (running && !busy) {
+      try { await oneFrame(); dirty = true; } catch (e) { await new Promise(r => setTimeout(r, 120)); }
+    } else {
+      lastT = 0;                                      // 停了就不再累加运行时长
+      await new Promise(r => setTimeout(r, 120));
+    }
+  }
+}
+
+function rafLoop() {
+  if (dirty) { draw(); dirty = false; }
+  requestAnimationFrame(rafLoop);
+}
+
+// 任何交互都触发一次重绘（悬停/缩放/点通道名…）
+['mousemove', 'mousedown', 'mouseup', 'wheel', 'click', 'keydown']
+  .forEach(ev => window.addEventListener(ev, () => { dirty = true; }, { passive: true }));
+// 兜底心跳，防止漏标状态导致画面不刷新
+setInterval(() => { dirty = true; }, 300);
+
+fetchLoop();
+rafLoop();
+
+// ================= 元数据 / 板载按钮 =================
+async function refreshMeta() {
+  try {
+    const m = await (await fetch('/meta')).json();
+    DIV = m.div; CLK = m.clk_mhz * 1e6;
+    document.getElementById('sel-div').value = String(DIV);
+    // 解码器以服务端为准：刷新页面后下拉要和板子当前状态一致，
+    // 否则页面按 UART 解、板子却按 I2C 采样，看起来像坏了
+    if (m.proto_sel !== undefined && m.proto_sel !== PROTO) {
+      PROTO = m.proto_sel;
+      document.getElementById('sel-proto').value = String(PROTO);
+    }
+    const pb = document.getElementById('btn-pb');
+    if (pb) pb.textContent = 'Pmod B：' + (m.pmodb ? '开' : '关');
+
+    // 板载 BTN0 接的是 trig_fsm 的 restart：按一下 → 采集停；再按一下 → 恢复。
+    // 做成 toggle，方便现场用板子上的按钮直接演示，不用切回鼠标。
+    if (btnCnt >= 0 && m.btn_cnt !== btnCnt) {
+      running = !running;
+      if (running) {
+        live = true;
+        trigPos = null;
+        lastT = performance.now();
+        fetch('/live').catch(() => {});
+      }
+      setRunBtn();
+    }
+    btnCnt = m.btn_cnt;
+  } catch (e) {}
+}
+async function metaLoop() {
+  for (;;) {
+    await refreshMeta();
+    await new Promise(r => setTimeout(r, 900));        // 串行：读完再等，不堆积
+  }
+}
+metaLoop();
+
+// ================= 鼠标 =================
+function evPos(e) {
+  const r = cv.getBoundingClientRect();
+  const D = dpr();
+  return { x: (e.clientX - r.left) * D, y: (e.clientY - r.top) * D };
+}
+
+cv.addEventListener('wheel', e => {
+  e.preventDefault();
+  const p = evPos(e);
+  if (p.x < PAD_L()) return;
+  const n0 = shownCount() || 1;
+  const anchor = idxOf(p.x);
+  const n1 = Math.max(32, Math.min(MAXVIEW, Math.round(n0 * (e.deltaY > 0 ? 1.25 : 0.8))));
+  if (n1 === n0) return;
+  if (live) { live = false; running = false; setRunBtn(); }   // 快照模式下缩放要停住，否则下一帧就覆盖
+  viewLen = n1;
+  if (!live) {
+    const frac = (p.x - PAD_L()) / plotW();
+    viewStart = Math.round(anchor - frac * n1);
+    viewStart = Math.max(0, Math.min(viewStart, Math.max(0, count - Math.min(n1, count))));
+  }
+}, { passive: false });
+
+cv.addEventListener('mousedown', e => {
+  const p = evPos(e);
+  drag = { x0: p.x, viewStart0: viewLeft(), moved: false };
+});
+
+cv.addEventListener('mousemove', e => {
+  const p = evPos(e);
+  hoverX = (p.x >= PAD_L() && p.x <= PAD_L() + plotW()) ? p.x : null;
+
+  if (hoverX !== null) {
+    const off = Math.round(idxOf(p.x)) - viewLeft();
+    document.getElementById('s-pos') && (document.getElementById('s-pos').textContent =
+      (off >= 0 && off < shownCount()) ? fmtTime(off * DIV / CLK) : '—');
+  }
+
+  if (drag) {
+    const dx = p.x - drag.x0;
+    if (Math.abs(dx) > 3) drag.moved = true;
+    if (drag.moved) {
+      const perPx = shownCount() / Math.max(1, plotW());
+      live = false; running = false;
+      viewStart = Math.max(0, Math.min(Math.round(drag.viewStart0 - dx * perPx),
+                                       Math.max(0, count - Math.min(viewLen, count))));
+      setRunBtn();
+    }
+  }
+});
+
+cv.addEventListener('mouseup', e => {
+  const p = evPos(e);
+
+  // 左栏 = 通道开关
+  if (p.x < PAD_L()) {
+    const pt = PAD_T(), gh = plotH(), rowH = gh / 8;
+    if (p.y >= pt && p.y <= pt + gh) {
+      const ch = Math.floor((p.y - pt) / rowH);
+      if (ch >= 0 && ch < 8) { shown[ch] = !shown[ch]; curA = curB = null; }
+    }
+    drag = null;
+    return;
+  }
+
+  if (drag && !drag.moved && p.x <= PAD_L() + plotW()) {
+    const pos = Math.round(idxOf(p.x)) - viewLeft();
+    if (pos >= 0 && pos < shownCount()) {
+      if (e.shiftKey) curB = pos; else curA = pos;
+    }
+  }
+  drag = null;
+});
+
+cv.addEventListener('mouseleave', () => { drag = null; hoverX = null; });
+cv.addEventListener('dblclick', () => fitView());
+
+// ================= 按钮 =================
+const btnRun = document.getElementById('btn-run');
+const btnTr  = document.getElementById('btn-tr');
+
+function setRunBtn() {
+  btnRun.textContent = running ? '⏸ 停止采集' : '▶ 开始采集';
+  btnRun.classList.toggle('run', running);
+  const dot = document.getElementById('dot');
+  dot.style.background = running ? 'var(--ok)' : 'var(--warn)';
+  dot.style.boxShadow = '0 0 8px ' + (running ? 'var(--ok)' : 'var(--warn)');
+  if (running) lastT = performance.now();
+}
+
+btnRun.onclick = () => {
+  running = !running;
+  if (running) {
+    live = true; trigPos = null;
+    if (SNAPS.length) showSnap(SNAPS.length - 1);
+    lastT = performance.now();
+    fetch('/live').catch(() => {});     // 板载按钮会把 FSM 打到 IDLE，这里顺手恢复自由运行
+  } else {
+    lastT = 0;
+  }
+  setRunBtn();
+};
+
+function fitView() {
+  viewLen = Math.min(count || 1024, MAXVIEW);
+  live = true; viewStart = 0;
+  curA = curB = null;
+  running = true;
+  setRunBtn();
+}
+document.getElementById('btn-fit').onclick = fitView;
+document.getElementById('btn-zi').onclick = () => { viewLen = Math.max(32, Math.round(viewLen * 0.7)); };
+document.getElementById('btn-zo').onclick = () => { viewLen = Math.min(MAXVIEW, Math.round(viewLen * 1.4)); };
+
+btnTr.onclick = async () => {
+  busy = true; running = false; lastT = 0;
+  btnTr.disabled = true; btnTr.textContent = '采集中…';
+  try {
+    const ch  = document.getElementById('sel-tch').value;
+    const edg = document.getElementById('sel-edge').value;
+    const pre = (PROTO === 2) ? 128 : 1024;
+    const q = `/capture?div=${DIV}&pre=${pre}&chan=${ch}&mode=${edg}&n=4096`;
+    const m = await (await fetch(q)).json();
+    if (!m.ok) throw new Error(m.error || 'capture failed');
+    const bin = Uint8Array.from(atob(m.data), c => c.charCodeAt(0));
+    clearSnaps();
+    pushSamples(bin);
+    totalPts += bin.length;
+    viewLen = bin.length; viewStart = 0;
+    live = false;
+    trigPos = m.pre_trig;
+    curA = curB = null;
+  } catch (e) {
+    alert('触发失败：' + e.message + '\n（没等到该边沿？换个触发通道/边沿试试）');
+  }
+  busy = false;
+  btnTr.disabled = false; btnTr.textContent = '单次触发';
+  setRunBtn();
+};
+
+document.getElementById('btn-live').onclick = async () => {
+  trigPos = null;
+  clearSnaps();
+  running = true; live = true; viewLen = Math.min(N, MAXVIEW);
+  lastT = performance.now();
+  try { await fetch('/live'); } catch (e) {}
+  setRunBtn();
+};
+
+document.getElementById('sel-proto').onchange = async e => {
+  PROTO = +e.target.value;
+  if (PROTO === 0) {
+    // UART：位周期 640 clk，1.5625 MSa/s（DIV=40）时每位正好 16 点
+    DIV = 40; N = 8192;
+    document.getElementById('sel-n').value = '8192';
+    document.getElementById('sel-div').value = '40';
+    document.getElementById('sel-tch').value = '0';
+  } else if (PROTO === 2) {
+    // I2C：SCL 半周期 200 clk，3.125 MSa/s（DIV=20）时每半周期 10 点
+    DIV = 20; N = 8192;
+    document.getElementById('sel-n').value = '8192';
+    document.getElementById('sel-div').value = '20';
+    document.getElementById('sel-tch').value = '4';
+  } else {
+    DIV = 1000;
+    document.getElementById('sel-div').value = '1000';
+  }
+  viewLen = Math.min(N, MAXVIEW); live = true; viewStart = 0; trigPos = null;
+  running = true;
+  clearSnaps(); lastT = performance.now();
+  await fetch(`/set?proto=${PROTO}&div=${DIV}&n=${N}`);
+  setRunBtn();
+  dirty = true;
+};
+
+// Pmod B 测试信号总开关：关掉后 8 根针高阻，Pmod A 可以接真实电路
+document.getElementById('btn-pb').onclick = async () => {
+  const on = !document.getElementById('btn-pb').textContent.includes('开');
+  document.getElementById('btn-pb').textContent = 'Pmod B：' + (on ? '开' : '关');
+  await fetch('/set?pmodb=' + (on ? 1 : 0));
+};
+
+document.getElementById('sel-n').onchange = e => {
+  N = +e.target.value;
+  viewLen = Math.min(N, MAXVIEW);
+  viewStart = 0; live = true; trigPos = null;
+  clearSnaps();
+  lastT = performance.now();
+  if (!running) { running = true; setRunBtn(); }
+};
+
+document.getElementById('sel-div').onchange = async e => {
+  DIV = +e.target.value;
+  clearSnaps();
+  await fetch('/set?div=' + DIV);
+};
+
+document.getElementById('btn-png').onclick = () => {
+  cv.toBlob(b => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(b);
+    a.download = 'logic_' + new Date().toISOString().replace(/[:.]/g, '-') + '.png';
+    a.click();
+  }, 'image/png');
+};
+
+setRunBtn();
+</script>
+</body>
+</html>
