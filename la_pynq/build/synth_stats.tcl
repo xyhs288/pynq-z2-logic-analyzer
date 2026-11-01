@@ -1,6 +1,7 @@
 # 单独综合 timing_stats，只为拿资源占用数字（不出 bitstream，所以不需要引脚约束）
-set repo "D:/Workbuddy_project/2026-09-16-19-24-33/la_pynq"
-set out  "D:/vivado_project/logic_analyzer_loopback"
+set here [file dirname [file normalize [info script]]]
+set repo [file dirname $here]
+set out    [file join $here "out"]
 
 file mkdir $out
 read_verilog ${repo}/rtl/timing_stats.v

@@ -1,7 +1,6 @@
 ---
 name: vivado-cli-flow
 description: 用命令行驱动本机 Vivado 2025.2，完成 FPGA 工程的构建（综合/实现/bitstream）、仿真自检、以及下载到开发板。当需要构建 FPGA 设计、跑仿真验证、或把 bitstream 烧进板子时使用。触发词：Vivado, 综合, 实现, bitstream, 上板, 下载, 仿真, xsim, xvlog, PYNQ-Z2, xc7z020。
-agent_created: true
 ---
 
 # Vivado 命令行全流程

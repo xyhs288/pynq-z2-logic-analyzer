@@ -13,8 +13,9 @@
 #    run 管理器用子进程退出码判定成败，而 vivado.bat 退出码恒为 1。
 # =====================================================================
 
-set repo  "D:/Workbuddy_project/2026-09-16-19-24-33/la_pynq"
-set out   "D:/vivado_project/la_clkmon"
+set here [file dirname [file normalize [info script]]]
+set repo [file dirname $here]
+set out    [file join $here "out"]
 set part  "xc7z020clg400-1"
 set proj  "clkmon"
 

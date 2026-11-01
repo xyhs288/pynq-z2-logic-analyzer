@@ -6,12 +6,12 @@
 #
 #  Usage - in Vivado's Tcl Console, type this one line:
 #
-#      source {D:/Workbuddy_project/2026-09-16-19-24-33/la_pynq/build/build_in_gui.tcl}
+#      source {<本仓库>/la_pynq/build/build_in_gui.tcl}
 #
 #  To build a different top level, set it first:
 #
 #      set top "stage2_top"
-#      source {D:/Workbuddy_project/2026-09-16-19-24-33/la_pynq/build/build_in_gui.tcl}
+#      source {<本仓库>/la_pynq/build/build_in_gui.tcl}
 #
 #  This is the non-project flow (read -> synth -> impl -> bitstream),
 #  the same one the batch script uses, so results are identical.
@@ -23,8 +23,9 @@ if {![info exists top]} {
 }
 
 set part   "xc7z020clg400-1"
-set root   "D:/Workbuddy_project/2026-09-16-19-24-33/la_pynq"
-set outdir "D:/vivado_project/logic_analyzer_gui"
+set here [file dirname [file normalize [info script]]]
+set root [file dirname $here]
+set outdir [file join $here "out"]
 
 puts "=========================================================="
 puts "  BUILD IN GUI"

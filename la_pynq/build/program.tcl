@@ -7,7 +7,8 @@
 #  前提：板子已插 micro USB；GUI 的 Hardware Manager 没有占着板子。
 # =====================================================================
 
-set out "D:/vivado_project/logic_analyzer_loopback"
+set here [file dirname [file normalize [info script]]]
+set out [file join $here "out"]
 
 if {$argc > 0} { set top [lindex $argv 0] } else { set top "loopback_top" }
 set bit "${out}/${top}.bit"

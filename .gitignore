@@ -64,3 +64,6 @@ tight_setup_hold_pins.txt
 
 # ---- 交付打包产物 ----
 dist/
+
+# 构建输出（脚本默认写到 build/out）
+la_pynq/build/out/

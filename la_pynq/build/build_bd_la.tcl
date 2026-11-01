@@ -15,8 +15,9 @@
 #  绕开 run 管理器的原因见 SKILL 坑 23。
 # =====================================================================
 
-set repo "D:/Workbuddy_project/2026-09-16-19-24-33/la_pynq"
-set out  "D:/vivado_project/la_sys"
+set here [file dirname [file normalize [info script]]]
+set repo [file dirname $here]
+set out    [file join $here "out"]
 set part "xc7z020clg400-1"
 set proj "la_sys"
 

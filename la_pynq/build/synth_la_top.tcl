@@ -1,7 +1,8 @@
 # 单独综合 la_top（out-of-context，不做引脚约束）——只为拿资源与层次数据
 # 完整工程要在 Vivado 里配 Zynq PS7 + AXI Interconnect，但资源占用 OOC 即可评估
-set repo "D:/Workbuddy_project/2026-09-16-19-24-33/la_pynq"
-set out  "D:/vivado_project/logic_analyzer_loopback"
+set here [file dirname [file normalize [info script]]]
+set repo [file dirname $here]
+set out    [file join $here "out"]
 
 file mkdir $out
 

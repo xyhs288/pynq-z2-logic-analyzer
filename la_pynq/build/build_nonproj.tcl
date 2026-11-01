@@ -11,8 +11,9 @@
 #  需要浏览设计时，打开 $out/post_route.dcp。
 # =====================================================================
 
-set repo "D:/Workbuddy_project/2026-09-16-19-24-33/la_pynq"
-set out  "D:/vivado_project/logic_analyzer_loopback"
+set here [file dirname [file normalize [info script]]]
+set repo [file dirname $here]
+set out    [file join $here "out"]
 set part "xc7z020clg400-1"
 
 if {$argc > 0} { set top [lindex $argv 0] } else { set top "loopback_top" }

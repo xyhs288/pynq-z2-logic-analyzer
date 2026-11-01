@@ -11,11 +11,12 @@
 #  get_property STATUS；IP 全部落地后，用直接命令做综合/实现/出 bitstream。
 # =====================================================================
 
-set proj "D:/vivado_project/la_bd_test/bdtest.xpr"
+set here [file dirname [file normalize [info script]]]
+set proj [file join $here "out" "bdtest.xpr"]
 set top  "sys_wrapper"
 set part "xc7z020clg400-1"
-set out  "D:/vivado_project/la_bd_test"
-set bd   "D:/vivado_project/la_bd_test/bdtest.gen/sources_1/bd/sys"
+set out  [file join $here "out"]
+set bd   [file join $out "bdtest.gen" "sources_1" "bd" "sys"]
 
 open_project $proj
 
