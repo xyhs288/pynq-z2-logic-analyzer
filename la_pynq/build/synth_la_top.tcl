@@ -16,6 +16,8 @@ read_verilog [list \
     ${repo}/rtl/proto_trig.v \
     ${repo}/rtl/timing_stats.v \
     ${repo}/rtl/axi_regs.v \
+    ${repo}/rtl/i2c_src.v \
+    ${repo}/rtl/uart_tx.v \
     ${repo}/rtl/la_top.v \
 ]
 
